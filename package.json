@@ -1,0 +1,22 @@
+{
+  "name": "up-campus",
+  "version": "1.0.0",
+  "description": "Sistema de ubicación del personal en campus UP Guadalajara",
+  "type": "module",
+  "scripts": {
+    "dev:server": "node server/server.js",
+    "dev:client": "cd src && npm run dev",
+    "install:all": "npm install && cd src && npm install",
+    "build": "cd src && npm run build",
+    "preview": "cd src && npm run preview"
+  },
+  "keywords": ["campus", "location", "3d", "react", "three.js"],
+  "author": "UP Campus",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "mongoose": "^7.6.0"
+  }
+}
