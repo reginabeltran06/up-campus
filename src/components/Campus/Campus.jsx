@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "@react-three/drei";
 import Ground from "./Ground.jsx";
+import Roads from "./Roads.jsx";
 import { Building } from "./Building.jsx";
 import { PersonMarker } from "../People/PersonMarker.jsx";
 import { buildings } from "../../data/buildings.js";
@@ -27,8 +28,15 @@ export function Campus({
   }, {});
 
   // Contar personas por zona
-  const personsPerZone = assignments.reduce((acc, a) => {
-    acc[a.zonaId] = (acc[a.zonaId] || 0) + 1;
+
+  // Contar personas filtradas por turno en cada zona
+  const personsPerZone = persons.reduce((acc, person) => {
+    const zoneId = assignmentMap[person._id];
+
+    if (zoneId) {
+      acc[zoneId] = (acc[zoneId] || 0) + 1;
+    }
+
     return acc;
   }, {});
 
@@ -47,6 +55,7 @@ export function Campus({
 
       {/* Terreno */}
       <Ground />
+      {/* <Roads /> */}
 
       {/* Edificios */}
       {buildings.map((building) => (
@@ -92,8 +101,8 @@ export function Campus({
         ref={cameraRef}
         enabled={!draggedPerson}
         autoRotate={false}
-        minDistance={10}
-        maxDistance={200}
+        minDistance={35}
+        maxDistance={100}
         minPolarAngle={0}
         maxPolarAngle={Math.PI}
       />

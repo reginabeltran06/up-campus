@@ -8,7 +8,7 @@ campusShape.lineTo(7, -22.5);
 
 campusShape.lineTo(7, -19);
 
-campusShape.lineTo(9, -19);
+campusShape.lineTo(10, -19);
 
 campusShape.lineTo(12, 3);
 
@@ -34,9 +34,16 @@ export default function Ground() {
       rotation={[-Math.PI / 2, 0, 0]}
       position={[0, 0, 0]}
       scale={[1.8, 2, 1]}
+      receiveShadow
     >
       <shapeGeometry args={[campusShape]} />
-      <meshStandardMaterial color="#cecece" side={THREE.DoubleSide} />
+
+      <meshStandardMaterial
+        color="#9FA49F"
+        roughness={0.9}
+        metalness={0}
+        side={THREE.DoubleSide}
+      />
     </mesh>
   );
 }
