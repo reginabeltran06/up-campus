@@ -12,10 +12,14 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 const MONGO_URI = process.env.MONGO_URI;
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://up-campus.vercel.app",
+];
+
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
-    credentials: true,
+    origin: allowedOrigins,
   }),
 );
 
