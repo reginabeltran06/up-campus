@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -10,24 +10,19 @@ import { useToast } from "./hooks/useToast.js";
 import { Campus } from "./components/Campus/Campus.jsx";
 import { PersonList } from "./components/People/PersonList.jsx";
 import { PersonDetailsModal } from "./components/People/PersonDetailsModal.jsx";
-import { ZoneDetail } from "./components/UI/ZoneDetail.jsx";
+import { ZonePopover } from "./components/UI/ZonePopover.jsx";
 import { UnavailablePeople } from "./components/UI/UnavailablePeople.jsx";
 import { ToastContainer } from "./components/UI/Toast.jsx";
 import { Header } from "./components/UI/Header.jsx";
 
 import { buildings } from "./data/buildings.js";
 
-function CameraController({ draggedPerson, cameraRef }) {
+function CameraController({ cameraRef }) {
   const { camera } = useThree();
 
   useEffect(() => {
     cameraRef.current = camera;
-
-    if (!draggedPerson) {
-      camera.position.set(0, 40, 60);
-      camera.lookAt(0, 0, 0);
-    }
-  }, [draggedPerson, camera, cameraRef]);
+  }, [camera, cameraRef]);
 
   return null;
 }
@@ -147,15 +142,23 @@ export default function App() {
     [leftPanelWidth, rightPanelWidth],
   );
 
-  const assignmentMap = assignments.reduce((acc, assignment) => {
-    acc[assignment.personaId] = assignment.zonaId;
-    return acc;
-  }, {});
+  const assignmentMap = useMemo(
+    () =>
+      assignments.reduce((acc, assignment) => {
+        acc[assignment.personaId] = assignment.zonaId;
+        return acc;
+      }, {}),
+    [assignments],
+  );
 
-  const unavailableMap = unavailable.reduce((acc, item) => {
-    acc[item.personaId] = item;
-    return acc;
-  }, {});
+  const unavailableMap = useMemo(
+    () =>
+      unavailable.reduce((acc, item) => {
+        acc[item.personaId] = item;
+        return acc;
+      }, {}),
+    [unavailable],
+  );
 
   const matchesTurno = (person) => {
     const selected = normalizeTurno(selectedTurno);
@@ -206,14 +209,13 @@ export default function App() {
       matchesTurno(person) &&
       matchesSearch(person),
   );
+  const personsById = useMemo(
+    () => new Map(persons.map((p) => [p._id, p])),
+    [persons],
+  );
 
-  // Asignaciones visibles según el turno seleccionado.
-  // Se conservan las asignaciones originales para guardar cambios.
   const filteredAssignments = assignments.filter((assignment) => {
-    const person = persons.find(
-      (person) => person._id === assignment.personaId,
-    );
-
+    const person = personsById.get(assignment.personaId);
     return person && matchesTurno(person);
   });
 
@@ -228,31 +230,27 @@ export default function App() {
 
   const handlePersonDragEnd = useCallback(
     async (position) => {
-      if (!draggedPerson || !position) {
-        setDraggedPerson(null);
-        setDraggedPersonPosition(null);
-        return;
-      }
+      const person = draggedPerson;
+
+      // Suelta a la persona de inmediato, sin esperar al servidor
+      setDraggedPerson(null);
+      setDraggedPersonPosition(null);
+
+      if (!person || !position) return;
 
       const building = findBuildingAtPosition(position);
 
-      if (building) {
-        try {
-          await assignPersonToZone(draggedPerson._id, building.id);
-
-          addToast(
-            `✓ ${draggedPerson.nombre} asignado a ${building.nombre}`,
-            "success",
-          );
-        } catch (error) {
-          addToast("✗ Error al asignar persona", "error");
-        }
-      } else {
+      if (!building) {
         addToast("✗ Drop fuera de un edificio válido", "warning");
+        return;
       }
 
-      setDraggedPerson(null);
-      setDraggedPersonPosition(null);
+      try {
+        await assignPersonToZone(person._id, building.id);
+        addToast(`✓ ${person.nombre} asignado a ${building.nombre}`, "success");
+      } catch (error) {
+        addToast("✗ Error al asignar persona", "error");
+      }
     },
     [draggedPerson, findBuildingAtPosition, assignPersonToZone, addToast],
   );
@@ -261,25 +259,12 @@ export default function App() {
     async (person, motivo) => {
       try {
         await markUnavailable(person._id, motivo);
-
         addToast(`✓ ${person.nombre} marcado como no disponible`, "success");
-
-        setSelectedZone((current) => {
-          if (!current) return current;
-
-          const stillAssigned = assignments.some(
-            (assignment) =>
-              assignment.personaId === person._id &&
-              assignment.zonaId === current.id,
-          );
-
-          return stillAssigned ? null : current;
-        });
       } catch (error) {
         addToast("✗ Error al marcar persona como no disponible", "error");
       }
     },
-    [markUnavailable, addToast, assignments],
+    [markUnavailable, addToast],
   );
 
   const handleMarkAvailable = useCallback(
@@ -455,22 +440,12 @@ export default function App() {
           onDrop={handleDrop}
         >
           <Canvas
-            camera={{
-              position: [0, 45, 55],
-              fov: 55,
-              near: 0.1,
-              far: 500,
-            }}
+            camera={{ position: [0, 45, 55], fov: 55, near: 0.1, far: 500 }}
             shadows
-            gl={{
-              antialias: true,
-              powerPreference: "high-performance",
-            }}
+            gl={{ antialias: true, powerPreference: "high-performance" }}
+            onPointerMissed={() => setSelectedZone(null)}
           >
-            <CameraController
-              draggedPerson={draggedPerson}
-              cameraRef={cameraRef}
-            />
+            <CameraController cameraRef={cameraRef} />
 
             <Campus
               persons={persons}
@@ -483,7 +458,14 @@ export default function App() {
               onBuildingSelect={setSelectedZone}
               selectedZoneId={selectedZone?.id}
             />
-
+            <ZonePopover
+              building={selectedZone}
+              personsInZone={personsInZone}
+              onClose={() => setSelectedZone(null)}
+              onPersonDragStart={handlePersonDragStart}
+              onMarkUnavailable={handleMarkUnavailable}
+              onPersonSelect={setSelectedPerson}
+            />
             <ambientLight intensity={0.8} />
 
             <directionalLight
@@ -498,13 +480,6 @@ export default function App() {
               shadow-camera-bottom={-100}
             />
           </Canvas>
-
-          <UnavailablePeople
-            persons={filteredUnavailablePersons}
-            unavailable={unavailable}
-            onMarkAvailable={handleMarkAvailable}
-            onPersonSelect={setSelectedPerson}
-          />
         </div>
 
         <div
@@ -513,11 +488,10 @@ export default function App() {
         />
 
         <div className="right-panel">
-          <ZoneDetail
-            selectedZone={selectedZone}
-            personsInZone={personsInZone}
-            onPersonDragStart={handlePersonDragStart}
-            onMarkUnavailable={handleMarkUnavailable}
+          <UnavailablePeople
+            persons={filteredUnavailablePersons}
+            unavailable={unavailable}
+            onMarkAvailable={handleMarkAvailable}
             onPersonSelect={setSelectedPerson}
           />
         </div>

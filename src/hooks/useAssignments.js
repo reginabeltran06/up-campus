@@ -1,75 +1,89 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5001/api";
+const STORAGE_KEY = "up_campus_assignments";
+
+function readCache() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.warn("Error leyendo asignaciones locales:", error);
+    return [];
+  }
+}
 
 export function useAssignments(fecha = null) {
   const [assignments, setAssignments] = useState([]);
-  const [loading, setLoading] = useState(false);
+  // Empieza en true para que el efecto de persistencia no escriba
+  // antes de que termine la carga inicial.
+  const [loading, setLoading] = useState(true);
   const [lastBackupId, setLastBackupId] = useState(null);
 
   const today = fecha || new Date().toISOString().split("T")[0];
 
-  const saveAssignments = (data) => {
-    setAssignments(data);
-    localStorage.setItem("up_campus_assignments", JSON.stringify(data));
-  };
+  // Siempre apunta al estado más reciente (útil para revertir cambios)
+  const assignmentsRef = useRef(assignments);
+  assignmentsRef.current = assignments;
+
+  // Persiste en localStorage fuera del camino crítico
+  useEffect(() => {
+    if (loading) return;
+
+    try {
+      const otherDates = readCache().filter((a) => a.fecha !== today);
+
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify([...otherDates, ...assignments]),
+      );
+    } catch (error) {
+      console.warn("Error guardando asignaciones locales:", error);
+    }
+  }, [assignments, loading, today]);
 
   const fetchAssignments = useCallback(async () => {
     setLoading(true);
 
-    try {
-      const cached = localStorage.getItem("up_campus_assignments");
+    // Muestra primero lo que haya en cache para que la UI no espere
+    setAssignments(readCache().filter((a) => a.fecha === today));
 
-      if (cached) {
-        try {
-          const cachedData = JSON.parse(cached);
-          setAssignments(
-            cachedData.filter((assignment) => assignment.fecha === today),
-          );
-        } catch (error) {
-          console.warn("Error leyendo asignaciones locales:", error);
+    const loadAssignments = async () => {
+      try {
+        const response = await fetch(
+          `${API_URL}/assignments?fecha=${encodeURIComponent(today)}`,
+        );
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
+
+        const data = await response.json();
+        setAssignments(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Error cargando asignaciones:", error);
       }
+    };
 
-      const response = await fetch(
-        `${API_URL}/assignments?fecha=${encodeURIComponent(today)}`,
-      );
+    const loadLastBackup = async () => {
+      try {
+        const response = await fetch(
+          `${API_URL}/assignments/backups/latest?fecha=${encodeURIComponent(today)}`,
+        );
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        if (response.ok) {
+          const backup = await response.json();
+          setLastBackupId(backup?._id || null);
+        }
+      } catch (error) {
+        console.error("Error consultando respaldo:", error);
       }
+    };
 
-      const data = await response.json();
-      const currentAssignments = Array.isArray(data) ? data : [];
+    // Ambas peticiones en paralelo
+    await Promise.all([loadAssignments(), loadLastBackup()]);
 
-      setAssignments(currentAssignments);
-
-      const allCached = cached ? JSON.parse(cached) : [];
-      const otherDates = Array.isArray(allCached)
-        ? allCached.filter((assignment) => assignment.fecha !== today)
-        : [];
-
-      localStorage.setItem(
-        "up_campus_assignments",
-        JSON.stringify([...otherDates, ...currentAssignments]),
-      );
-    } catch (error) {
-      console.error("Error cargando asignaciones:", error);
-    } finally {
-      setLoading(false);
-    }
-
-    try {
-      const response = await fetch(
-        `${API_URL}/assignments/backups/latest?fecha=${encodeURIComponent(today)}`,
-      );
-      if (response.ok) {
-        const backup = await response.json();
-        setLastBackupId(backup?._id || null);
-      }
-    } catch (error) {
-      console.error("Error consultando respaldo:", error);
-    }
+    setLoading(false);
   }, [today]);
 
   useEffect(() => {
@@ -78,70 +92,77 @@ export function useAssignments(fecha = null) {
 
   const assignPersonToZone = useCallback(
     async (personaId, zonaId) => {
-      const response = await fetch(`${API_URL}/assignments`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          personaId,
-          zonaId,
-          fecha: today,
-        }),
-      });
+      const previous =
+        assignmentsRef.current.find((a) => a.personaId === personaId) ?? null;
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      // 1. UI inmediata
+      const optimistic = {
+        _id: `temp-${personaId}`,
+        personaId,
+        zonaId,
+        fecha: today,
+      };
 
-      const newAssignment = await response.json();
+      setAssignments((prev) => [
+        ...prev.filter((a) => a.personaId !== personaId),
+        optimistic,
+      ]);
 
-      setAssignments((prev) => {
-        const updated = [
-          ...prev.filter((a) => a.personaId !== personaId),
-          newAssignment,
-        ];
+      try {
+        // 2. Sincroniza con el servidor
+        const response = await fetch(`${API_URL}/assignments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ personaId, zonaId, fecha: today }),
+        });
 
-        const cached = localStorage.getItem("up_campus_assignments");
-        let allCached = [];
-
-        try {
-          allCached = cached ? JSON.parse(cached) : [];
-        } catch {
-          allCached = [];
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const otherDates = allCached.filter(
-          (a) => a.fecha !== today && a.personaId !== personaId,
+        const saved = await response.json();
+
+        // 3. Cambia la asignación temporal por la real
+        setAssignments((prev) =>
+          prev.map((a) => (a._id === optimistic._id ? saved : a)),
         );
 
-        localStorage.setItem(
-          "up_campus_assignments",
-          JSON.stringify([...otherDates, ...updated]),
-        );
+        return saved;
+      } catch (error) {
+        // 4. Revierte al estado anterior
+        setAssignments((prev) => {
+          const without = prev.filter((a) => a.personaId !== personaId);
+          return previous ? [...without, previous] : without;
+        });
 
-        return updated;
-      });
-
-      return newAssignment;
+        throw error;
+      }
     },
     [today],
   );
 
   const removeAssignment = useCallback(async (assignmentId) => {
-    const response = await fetch(`${API_URL}/assignments/${assignmentId}`, {
-      method: "DELETE",
-    });
+    const previous = assignmentsRef.current.find((a) => a._id === assignmentId);
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    // Quita de la UI inmediatamente
+    setAssignments((prev) => prev.filter((a) => a._id !== assignmentId));
+
+    try {
+      const response = await fetch(`${API_URL}/assignments/${assignmentId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+    } catch (error) {
+      // Revierte si falló
+      if (previous) {
+        setAssignments((prev) => [...prev, previous]);
+      }
+
+      throw error;
     }
-
-    setAssignments((prev) => {
-      const updated = prev.filter((a) => a._id !== assignmentId);
-      saveAssignments(updated);
-      return updated;
-    });
   }, []);
 
   const clearAssignments = useCallback(async () => {
@@ -157,12 +178,7 @@ export function useAssignments(fecha = null) {
 
     const result = await response.json();
 
-    setAssignments((prev) => {
-      const updated = prev.filter((assignment) => assignment.fecha !== today);
-      localStorage.setItem("up_campus_assignments", JSON.stringify(updated));
-      return [];
-    });
-
+    setAssignments([]);
     setLastBackupId(result.backupId);
 
     return result;

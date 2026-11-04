@@ -13,39 +13,25 @@ export function UnavailablePeople({
   onMarkAvailable = null,
   onPersonSelect,
 }) {
-  const [expanded, setExpanded] = useState(false);
-
   const unavailablePeople = unavailable
     .map((item) => {
-      const person = persons.find((person) => person._id === item.personaId);
-
-      if (!person) return null;
-
-      return {
-        ...item,
-        person,
-      };
+      const person = persons.find((p) => p._id === item.personaId);
+      return person ? { ...item, person } : null;
     })
     .filter(Boolean);
 
-  if (unavailablePeople.length === 0) {
-    return null;
-  }
-
   return (
-    <div className="unavailable-window">
-      <button
-        className="unavailable-header"
-        onClick={() => setExpanded((prev) => !prev)}
-      >
-        <span className="unavailable-title"> No disponibles</span>
-
+    <div className="unavailable-panel">
+      <div className="unavailable-panel-header">
+        <h2>No disponibles</h2>
         <span className="unavailable-count">{unavailablePeople.length}</span>
+      </div>
 
-        <span className="unavailable-arrow">{expanded ? "▼" : "▲"}</span>
-      </button>
-
-      {expanded && (
+      {unavailablePeople.length === 0 ? (
+        <p className="unavailable-empty">
+          Nadie está marcado como no disponible
+        </p>
+      ) : (
         <div className="unavailable-list">
           {unavailablePeople.map((item) => (
             <div
@@ -54,7 +40,6 @@ export function UnavailablePeople({
               onClick={() => onPersonSelect?.(item.person)}
               style={{ cursor: "pointer" }}
             >
-              {" "}
               {item.person.foto && (
                 <img
                   src={item.person.foto}
@@ -62,19 +47,19 @@ export function UnavailablePeople({
                   className="unavailable-avatar"
                 />
               )}
+
               <div className="unavailable-person-info">
                 <p className="unavailable-person-name">{item.person.nombre}</p>
-
                 <p className="unavailable-reason">
                   {reasonLabels[item.motivo] || "Otro"}
                 </p>
               </div>
+
               <button
                 className="available-button"
                 title="Volver a hacer disponible"
                 onClick={async (e) => {
                   e.stopPropagation();
-
                   try {
                     await onMarkAvailable?.(item._id);
                   } catch (error) {

@@ -28,8 +28,27 @@ function useExtrudedShape(shapePoints, height) {
 
 export function Building({ building, onSelect, isSelected, personsCount = 0 }) {
   const baseColor = getBuildingColor(building.supervision);
-  const color = isSelected ? "#ff6b6b" : baseColor;
 
+  const color = useMemo(() => {
+    if (!isSelected) return baseColor;
+
+    // Oscurece el color base y lo hace más vivo
+    const c = new THREE.Color(baseColor);
+    const hsl = {};
+    c.getHSL(hsl);
+
+    c.setHSL(hsl.h, Math.min(1, hsl.s + 0.2), Math.max(0, hsl.l - 0.2));
+
+    return c;
+  }, [baseColor, isSelected]);
+
+  <meshStandardMaterial
+    color={color}
+    emissive={isSelected ? baseColor : "#000000"}
+    emissiveIntensity={isSelected ? 0.35 : 0}
+    roughness={0.7}
+    metalness={0.05}
+  />;
   const hasShape = Array.isArray(building.shape);
   const buildingHeight = hasShape ? (building.height ?? 3) : building.size[1];
 
